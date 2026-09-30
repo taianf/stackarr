@@ -42,6 +42,9 @@ read_env() {
 }
 
 ADMIN_USER="$(read_env STACKARR_ADMIN_USERNAME)"
+# Login e-mail for the *arr accounts: Users.Identifier is NOT NULL and is what the
+# app shows on the login form.
+ADMIN_EMAIL="$(read_env STACKARR_ADMIN_EMAIL)"
 ADMIN_PASS="$(read_env STACKARR_ADMIN_PASSWORD)"
 ADMIN_PASS="${ADMIN_PASS//\"/}"
 ADMIN_PASS="${ADMIN_PASS//\'/}"
@@ -51,7 +54,8 @@ if [[ -z $ADMIN_PASS ]]; then
 	exit 0
 fi
 
-export ADMIN_USER ADMIN_PASS MODE CONFIG_ROOT ENV_FILE ROOT
+ADMIN_EMAIL="${ADMIN_EMAIL:-$ADMIN_USER@localhost}"
+export ADMIN_USER ADMIN_EMAIL ADMIN_PASS MODE CONFIG_ROOT ENV_FILE ROOT
 
 if ! command -v python3 >/dev/null; then
 	echo "error: python3 is required" >&2
@@ -83,6 +87,7 @@ CFG = os.environ["CONFIG_ROOT"]
 ENV_FILE = os.environ["ENV_FILE"]
 ROOT = os.environ["ROOT"]
 USER = os.environ["ADMIN_USER"] or "admin"
+IDENTIFIER = os.environ["ADMIN_EMAIL"] or f"{USER}@localhost"
 PW = os.environ["ADMIN_PASS"].encode()
 CHECK = os.environ["MODE"] == "check"
 
@@ -186,7 +191,32 @@ def servarr(name):
         return report(name, "error", f"sqlite: {e}")
 
     if not rows:
-        return report(name, "error", "no user rows")
+        # A fresh install has an empty Users table: the app only writes the first
+        # row when someone completes its own login wizard. Seeding the account
+        # here is what makes the stack usable without clicking through four
+        # separate wizards, and it matches the shared-password model above.
+        was = restart(name)
+        try:
+            con = sqlite3.connect(db)
+            salt = base64.b64encode(secrets.token_bytes(16)).decode()
+            # Identifier is the login email and is NOT NULL; Username is the
+            # display name. Both are required to satisfy the schema.
+            con.execute(
+                "INSERT INTO Users (Identifier, Username, Password, Salt, Iterations)"
+                " VALUES (?,?,?,?,?)",
+                (IDENTIFIER, USER, servarr_hash(PW, salt, SERVARR_ITERATIONS),
+                 salt, SERVARR_ITERATIONS),
+            )
+            con.commit()
+            reroot(db)
+        except sqlite3.Error as e:
+            con.close()
+            start(name)
+            return report(name, "error", f"sqlite: {e}")
+        con.close()
+        if was:
+            start(name)
+        return report(name, "updated", f"{USER} created (fresh install)")
 
     bad = []
     for _id, uname, stored, salt, iters in rows:
@@ -385,9 +415,16 @@ def postgres():
         return report("postgres", "skipped", "container not present")
     # The superuser is the account that actually gates access here.
     pguser = read_env_value("DATABASE_SUPERUSER") or "postgres"
+    # The superuser password is NOT the shared admin password. Stackarr
+    # generates its own DATABASE_SUPERUSER_PASSWORD (randomBytes(24).hex) and
+    # that value is what the compose passes to the container on every setup.
+    # Syncing this role to the shared admin password would desync the database
+    # from the compose the moment Stackarr regenerates it, and the app would
+    # fail to connect. So read the key the compose actually uses.
+    pg_pw = (read_env_value("DATABASE_SUPERUSER_PASSWORD") or PW).encode()
 
     def current():
-        return scram_matches(PW, pg_verifier(pguser))
+        return scram_matches(pg_pw, pg_verifier(pguser))
 
     if CHECK:
         got = current()
@@ -405,7 +442,8 @@ def postgres():
     alter = subprocess.run(
         (
             "docker", "exec", "-i", "database",
-            "psql", "-U", pguser, "-v", "ON_ERROR_STOP=1", "-v", f"pw={PW.decode()}",
+            "psql", "-U", pguser, "-v", "ON_ERROR_STOP=1",
+            "-v", f"pw={pg_pw.decode()}",
         ),
         input=f'ALTER ROLE "{pguser}" WITH PASSWORD :\'pw\';\n',
         capture_output=True, text=True,

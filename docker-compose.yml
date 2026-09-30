@@ -87,6 +87,16 @@ services:
       TZ: ${TIMEZONE:-Etc/UTC}
       STACKARR_WEB_PORT: ${STACKARR_WEB_PORT:-7777}
       STACKARR_REPO_ROOT: /app
+      # The setup builds every storage path from defaultStackarrAppRoot(), which
+      # in Docker is ${STACKARR_REPO_ROOT}/stackarr/.stackarr = /app/stackarr/.stackarr.
+      # That is a path INSIDE this container, but the compose it generates runs on
+      # the HOST, so the managed containers mount a directory that does not exist
+      # there and Postgres crash-loops on "cannot create directory
+      # /var/lib/postgresql/data". This override points the setup at the real host
+      # path. Without it, every MEDIA_ROOT/MUSIC_ROOT/DOWNLOADS_ROOT/BACKUP_ROOT it
+      # writes is wrong, and it also ignores the mediaRoot/downloadsRoot arguments
+      # passed to stackarr_setup_media_server.
+      APP_ROOT_DEFAULT_OVERRIDE: ${APP_ROOT:-./.stackarr}
       STACKARR_DATABASE_FILE: /stackarr-config/stackarr.db
       STACKARR_DATABASE_DIR: ${STACKARR_DATABASE_DIR:-${CONFIG_ROOT:-./.stackarr/config}}
       STACKARR_DATABASE_MODE: ${STACKARR_DATABASE_MODE:-app-default}
@@ -113,33 +123,18 @@ services:
       - "${CONFIG_ROOT:-./.stackarr/config}:${CONFIG_ROOT:-/stackarr-host-config}"
       - "${STATE_ROOT:-./.stackarr/state}:${STATE_ROOT:-/stackarr-runtime-state}"
       - "${LOG_ROOT:-./.stackarr/logs}:${LOG_ROOT:-/stackarr-logs}"
-      - "${MEDIA_ROOT:-./.stackarr/media}:${MEDIA_ROOT:-/stackarr-media}:rw"
-      - "${MUSIC_ROOT:-./.stackarr/media/Music}:${MUSIC_ROOT:-/stackarr-music}:rw"
+      - "${MEDIA_ROOT:-./.stackarr/media}:${MEDIA_ROOT:-/stackarr-media}:ro"
+      - "${MUSIC_ROOT:-./.stackarr/media/Music}:${MUSIC_ROOT:-/stackarr-music}:ro"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:${DOWNLOADS_ROOT:-/stackarr-downloads}"
       # The secure game importer only reads completed downloads and writes to RomM's library.
-      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:rw"
-      # No /stackarr-romm-library mounts: RomM and Questarr are disabled. The
-      # stock definition mounts that library read-only and then mounts Steam/
-      # SteamWindows/SteamLinux read-write *beneath* it, which Docker cannot
-      # satisfy (it must mkdir the sub-mountpoints inside a read-only mount), so
-      # the app container failed to start. Restore these only if you enable RomM.
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:ro"
+      - "${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}:/stackarr-romm-library:${QUESTARR_ROMM_LIBRARY_MOUNT_MODE:-ro}"
+      - "${ROMM_STEAM_MAC_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/stackarr-romm-library/Steam:ro"
+      - "${ROMM_STEAM_WINDOWS_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/stackarr-romm-library/SteamWindows:ro"
+      - "${ROMM_STEAM_LINUX_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/stackarr-romm-library/SteamLinux:ro"
       - "${BACKUP_ROOT:-./.stackarr/backups}:${BACKUP_ROOT:-/stackarr-backups}"
-      # No PLEX_CONFIG_PATH / PLEX_PREFS_PATH mounts: Plex is disabled, and
-      # binding /dev/null onto /native-plex-config relies on a Docker Desktop
-      # WSL bind-mount shim that goes stale across host restarts, which made the
-      # app container fail to start ("not a directory"). Restore these two lines
-      # only if you switch to native Plex mode.
-      # Stackarr regenerates state/compose/docker-compose.yml by copying this
-      # image template verbatim. The stock template mounts Lidarr's music
-      # library read-only, which makes the Lidarr root folder unsettable
-      # ("Folder '/music' is not writable"). Override it with a corrected copy
-      # so the fix survives regeneration and container recreation.
-      - "${APP_ROOT:-./.stackarr}/stackarr-compose-template.yml:/app/stackarr/docker-compose.yml:ro"
-      # configure.sh passes Radarr's ~303 KiB customformat JSON to python3 as a
-      # single argv entry, which exceeds Linux's 131072-byte MAX_ARG_STRLEN and
-      # aborts before the release-group/release-title custom formats are created.
-      # Patched copy spills the JSON to a temp file and passes the path instead.
-      - "${APP_ROOT:-./.stackarr}/configure.sh.patched:/app/stackarr/scripts/configure.sh:ro"
+      - "${PLEX_CONFIG_PATH:-/dev/null}:${PLEX_CONFIG_PATH:-/native-plex-config}:ro"
+      - "${PLEX_PREFS_PATH:-/dev/null}:${PLEX_PREFS_PATH:-/native-plex-prefs}:ro"
     ports:
       - "${STACKARR_BIND_IP:-127.0.0.1}:${STACKARR_WEB_PORT:-7777}:${STACKARR_WEB_PORT:-7777}"
     labels:
@@ -222,9 +217,10 @@ services:
       - 1.1.1.1
       - 1.0.0.1
     volumes:
-      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:ro"
       - "${APP_ROOT:-./.stackarr}/config/sonarr:/config"
-      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:ro"
+      - "${APP_ROOT:-./.stackarr}/config/transmission/torrents:/torrent-client-state/transmission:ro"
       - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
       - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
@@ -253,9 +249,10 @@ services:
       - 1.1.1.1
       - 1.0.0.1
     volumes:
-      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:ro"
       - "${APP_ROOT:-./.stackarr}/config/sonarr4k:/config"
-      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:ro"
+      - "${APP_ROOT:-./.stackarr}/config/transmission/torrents:/torrent-client-state/transmission:ro"
       - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
       - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
@@ -284,9 +281,10 @@ services:
       - 1.1.1.1
       - 1.0.0.1
     volumes:
-      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:ro"
       - "${APP_ROOT:-./.stackarr}/config/radarr:/config"
-      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:ro"
+      - "${APP_ROOT:-./.stackarr}/config/transmission/torrents:/torrent-client-state/transmission:ro"
       - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
       - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
@@ -313,9 +311,10 @@ services:
       - 1.1.1.1
       - 1.0.0.1
     volumes:
-      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:ro"
       - "${APP_ROOT:-./.stackarr}/config/radarr4k:/config"
-      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:ro"
+      - "${APP_ROOT:-./.stackarr}/config/transmission/torrents:/torrent-client-state/transmission:ro"
       - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
       - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
@@ -549,7 +548,7 @@ services:
       - yarn
       - start
     volumes:
-      - "./agregarr-placeholder-guard.cjs:/stackarr-runtime/agregarr-placeholder-guard.cjs:rw"
+      - "./agregarr-placeholder-guard.cjs:/stackarr-runtime/agregarr-placeholder-guard.cjs:ro"
       - "${APP_ROOT:-./.stackarr}/config/agregarr:/app/config"
       # Required only when placeholder-backed sources (e.g. Coming Soon) are enabled.
       # Agregarr writes to a configurable subfolder (default: _Trailers) inside these Plex library roots
@@ -580,7 +579,6 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       TZ: ${TIMEZONE:-Etc/UTC}
-      # DSN embute a senha: nao usar default, tem de vir de .env
       DATABASE_URL: ${TRACEARR_DATABASE_URL:?TRACEARR_DATABASE_URL must be set in .env}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${TRACEARR_JWT_SECRET:-}
@@ -634,13 +632,6 @@ services:
       - seerr
     container_name: seerr
     image: ${SEERR_IMAGE:-ghcr.io/seerr-team/seerr:latest}
-    # init: true gives the node process a real PID 1, so SIGTERM reaches it and
-    # the container shuts down on time instead of waiting out the kill timeout.
-    init: true
-    # Seerr runs as UID 1000 (the node user) but Docker creates a bind mount as
-    # root, so on first boot it crash-loops with EACCES on /app/config/logs.
-    # Fix the owner once, as root, before the first start:
-    #   docker run --rm -v "$PWD/.stackarr/config:/cfg" alpine chown -R 1000:1000 /cfg/seerr
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       LOG_LEVEL: info
@@ -655,12 +646,6 @@ services:
       - "${APP_ROOT:-./.stackarr}/config/seerr:/app/config"
     ports:
       - "${SEERR_BIND_IP:-127.0.0.1}:5055:5055"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:5055/api/v1/status || exit 1"]
-      start_period: 20s
-      timeout: 3s
-      interval: 15s
-      retries: 3
     restart: unless-stopped
 
   plex:
@@ -750,7 +735,7 @@ services:
       - 1.0.0.1
     volumes:
       - "${APP_ROOT:-./.stackarr}/config/lidarr:/config"
-      - "${MUSIC_ROOT:-./.stackarr/media/Music}:/music:rw"
+      - "${MUSIC_ROOT:-./.stackarr/media/Music}:/music:ro"
       - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
     ports:
       - "${LIDARR_BIND_IP:-127.0.0.1}:8686:8686"
@@ -784,7 +769,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${BOOKORBIT_CONTAINER_PORT:-7582}
-      # DSN embute a senha: nao usar default, tem de vir de .env
       DATABASE_URL: ${BOOKORBIT_DATABASE_URL:?BOOKORBIT_DATABASE_URL must be set in .env}
       JWT_SECRET: ${BOOKORBIT_JWT_SECRET:?BOOKORBIT_JWT_SECRET must be set in .env}
       SETUP_BOOTSTRAP_TOKEN: ${BOOKORBIT_SETUP_TOKEN:?BOOKORBIT_SETUP_TOKEN must be set in .env}
@@ -839,7 +823,7 @@ services:
     environment:
       CLAMAV_NO_MILTERD: "true"
     volumes:
-      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:rw"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:ro"
       - "${CLAMAV_DATA_ROOT:-./.stackarr/config/clamav}:/var/lib/clamav"
     security_opt:
       - no-new-privileges:true
@@ -1064,8 +1048,8 @@ services:
       IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
     volumes:
       - "${IMMICH_UPLOAD_LOCATION:-./.stackarr/media/Pictures}:/data"
-      - "${IMMICH_EXTERNAL_LIBRARY_LOCATION:-immich-external}:/external:rw"
-      - "/etc/localtime:/etc/localtime:rw"
+      - "${IMMICH_EXTERNAL_LIBRARY_LOCATION:-immich-external}:/external:ro"
+      - "/etc/localtime:/etc/localtime:ro"
     ports:
       - "${IMMICH_BIND_IP:-127.0.0.1}:${IMMICH_WEB_PORT:-2283}:${IMMICH_CONTAINER_PORT:-2283}"
     depends_on:
