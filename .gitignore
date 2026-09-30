@@ -1,0 +1,12 @@
+# Secrets. .env holds STACKARR_ADMIN_PASSWORD, STACKARR_ADMIN_USERNAME and
+# TINYMEDIAMANAGER_PASSWORD in plaintext. Never commit it - a secret pushed to a
+# remote stays readable in the history even after a later commit removes it.
+.env
+
+# All runtime state: service databases, qBittorrent config and its password
+# hash, Jellyfin's database, generated compose, logs, media and downloads
+# (~566M). This is recreated by stackarr, so nothing here is source.
+.stackarr/
+
+# .env.example is the tracked, secret-free template and must not be ignored.
+!.env.example

@@ -1,0 +1,1095 @@
+name: ${STACKARR_COMPOSE_PROJECT_NAME:-stackarr}
+
+services:
+  image-cleanup:
+    profiles:
+      - maintenance
+    image: docker:29-cli
+    command:
+      - sh
+      - -lc
+      - docker image prune -a -f >/dev/null
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    restart: "no"
+
+  app-updater:
+    profiles:
+      - maintenance
+    image: ${STACKARR_IMAGE:-polyphonic/stackarr:alpha}
+    entrypoint:
+      - /app/bin/stackarr
+    command:
+      - update
+      - app-worker
+    group_add:
+      - "${STACKARR_DOCKER_GID:-0}"
+    environment:
+      STACKARR_REPO_ROOT: /app
+      STACKARR_DATABASE_FILE: /stackarr-config/stackarr.db
+      STACKARR_DATABASE_DIR: ${STACKARR_DATABASE_DIR:-${CONFIG_ROOT:-./.stackarr/config}}
+      STACKARR_DATABASE_MODE: ${STACKARR_DATABASE_MODE:-app-default}
+      STACKARR_DATABASE_URL: ${STACKARR_DATABASE_URL:-}
+      STACKARR_LOG_DATABASE_URL: ${STACKARR_LOG_DATABASE_URL:-}
+      STACKARR_COMPOSE_PROJECT_NAME: ${STACKARR_COMPOSE_PROJECT_NAME:-stackarr}
+      STACKARR_COMPOSE_PROJECT_DIR: ${STATE_ROOT:-./.stackarr/state}/compose
+      STACKARR_COMPOSE_FILE: ${STATE_ROOT:-./.stackarr/state}/compose/docker-compose.yml
+      STACKARR_RUNTIME: docker-updater
+      STACKARR_SECURITY_HANDOFF: ${STACKARR_SECURITY_HANDOFF:-false}
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "${STACKARR_DATABASE_DIR:-./.stackarr/config}:/stackarr-config"
+      - "${CONFIG_ROOT:-./.stackarr/config}:${CONFIG_ROOT:-/stackarr-host-config}"
+      - "${STATE_ROOT:-./.stackarr/state}:${STATE_ROOT:-/stackarr-runtime-state}"
+      - "${LOG_ROOT:-./.stackarr/logs}:${LOG_ROOT:-/stackarr-logs}"
+    restart: "no"
+
+  database:
+    profiles:
+      - database
+    container_name: database
+    image: ${DATABASE_IMAGE:-timescale/timescaledb-ha:pg18.1-ts2.25.0}
+    command: postgres -c timescaledb.license=timescale -c timescaledb.max_tuples_decompressed_per_dml_transaction=0 -c max_locks_per_transaction=4096 -c timescaledb.telemetry_level=off
+    environment:
+      POSTGRES_USER: ${DATABASE_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_SUPERUSER_PASSWORD:-stackarr}
+      POSTGRES_DB: ${DATABASE_NAME:-postgres}
+      PGDATA: ${DATABASE_PGDATA:-/var/lib/postgresql/data}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/database:/var/lib/postgresql"
+    ports:
+      - "${DATABASE_BIND_IP:-127.0.0.1}:${DATABASE_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DATABASE_SUPERUSER:-postgres} -d ${DATABASE_NAME:-postgres}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  app:
+    profiles:
+      - stackarr
+    container_name: app
+    image: ${STACKARR_IMAGE:-polyphonic/stackarr:alpha}
+    group_add:
+      - "${STACKARR_DOCKER_GID:-0}"
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
+      PORT: ${STACKARR_WEB_PORT:-7777}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      STACKARR_WEB_PORT: ${STACKARR_WEB_PORT:-7777}
+      STACKARR_REPO_ROOT: /app
+      STACKARR_DATABASE_FILE: /stackarr-config/stackarr.db
+      STACKARR_DATABASE_DIR: ${STACKARR_DATABASE_DIR:-${CONFIG_ROOT:-./.stackarr/config}}
+      STACKARR_DATABASE_MODE: ${STACKARR_DATABASE_MODE:-app-default}
+      STACKARR_DATABASE_URL: ${STACKARR_DATABASE_URL:-}
+      STACKARR_LOG_DATABASE_URL: ${STACKARR_LOG_DATABASE_URL:-}
+      STACKARR_COMPOSE_PROJECT_NAME: ${STACKARR_COMPOSE_PROJECT_NAME:-stackarr}
+      STACKARR_COMPOSE_PROJECT_DIR: ${STATE_ROOT:-./.stackarr/state}/compose
+      STACKARR_COMPOSE_FILE: ${STATE_ROOT:-./.stackarr/state}/compose/docker-compose.yml
+      STACKARR_POSTGRES_DATABASE: ${STACKARR_POSTGRES_DATABASE:-stackarr-main}
+      STACKARR_POSTGRES_MAIN_DATABASE: ${STACKARR_POSTGRES_MAIN_DATABASE:-stackarr-main}
+      STACKARR_POSTGRES_LOG_DATABASE: ${STACKARR_POSTGRES_LOG_DATABASE:-stackarr-log}
+      STACKARR_RUNTIME: docker
+      STACKARR_CONTAINER_NAME: app
+      STACKARR_SCHEDULER_ENABLED: ${STACKARR_SCHEDULER_ENABLED:-true}
+      STACKARR_MCP_HTTP_ENABLED: ${STACKARR_MCP_HTTP_ENABLED:-false}
+      STACKARR_MCP_HTTP_PORT: ${STACKARR_MCP_HTTP_PORT:-7780}
+      STACKARR_MCP_HTTP_ALLOWED_ORIGINS: ${STACKARR_MCP_HTTP_ALLOWED_ORIGINS:-}
+      STREAMRIP_STATE_ROOT: /stackarr-state/streamrip
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - "stackarr-state:/stackarr-state"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "${STACKARR_DATABASE_DIR:-./.stackarr/config}:/stackarr-config"
+      - "${CONFIG_ROOT:-./.stackarr/config}:${CONFIG_ROOT:-/stackarr-host-config}"
+      - "${STATE_ROOT:-./.stackarr/state}:${STATE_ROOT:-/stackarr-runtime-state}"
+      - "${LOG_ROOT:-./.stackarr/logs}:${LOG_ROOT:-/stackarr-logs}"
+      - "${MEDIA_ROOT:-./.stackarr/media}:${MEDIA_ROOT:-/stackarr-media}:rw"
+      - "${MUSIC_ROOT:-./.stackarr/media/Music}:${MUSIC_ROOT:-/stackarr-music}:rw"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:${DOWNLOADS_ROOT:-/stackarr-downloads}"
+      # The secure game importer only reads completed downloads and writes to RomM's library.
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:rw"
+      # No /stackarr-romm-library mounts: RomM and Questarr are disabled. The
+      # stock definition mounts that library read-only and then mounts Steam/
+      # SteamWindows/SteamLinux read-write *beneath* it, which Docker cannot
+      # satisfy (it must mkdir the sub-mountpoints inside a read-only mount), so
+      # the app container failed to start. Restore these only if you enable RomM.
+      - "${BACKUP_ROOT:-./.stackarr/backups}:${BACKUP_ROOT:-/stackarr-backups}"
+      # No PLEX_CONFIG_PATH / PLEX_PREFS_PATH mounts: Plex is disabled, and
+      # binding /dev/null onto /native-plex-config relies on a Docker Desktop
+      # WSL bind-mount shim that goes stale across host restarts, which made the
+      # app container fail to start ("not a directory"). Restore these two lines
+      # only if you switch to native Plex mode.
+      # Stackarr regenerates state/compose/docker-compose.yml by copying this
+      # image template verbatim. The stock template mounts Lidarr's music
+      # library read-only, which makes the Lidarr root folder unsettable
+      # ("Folder '/music' is not writable"). Override it with a corrected copy
+      # so the fix survives regeneration and container recreation.
+      - "${APP_ROOT:-./.stackarr}/stackarr-compose-template.yml:/app/stackarr/docker-compose.yml:ro"
+      # configure.sh passes Radarr's ~303 KiB customformat JSON to python3 as a
+      # single argv entry, which exceeds Linux's 131072-byte MAX_ARG_STRLEN and
+      # aborts before the release-group/release-title custom formats are created.
+      # Patched copy spills the JSON to a temp file and passes the path instead.
+      - "${APP_ROOT:-./.stackarr}/configure.sh.patched:/app/stackarr/scripts/configure.sh:ro"
+    ports:
+      - "${STACKARR_BIND_IP:-127.0.0.1}:${STACKARR_WEB_PORT:-7777}:${STACKARR_WEB_PORT:-7777}"
+    labels:
+      org.opencontainers.image.title: Stackarr
+      org.opencontainers.image.description: "[Stackarr](https://stackarr.app/) is a chat-first Docker control plane for self-hosted apps and homelabs."
+      org.opencontainers.image.authors: Stackarr
+      org.opencontainers.image.licenses: GPL-3.0-only
+      org.opencontainers.image.source: https://github.com/polyphonic/stackarr
+      org.opencontainers.image.documentation: https://stackarr.app/docs/installation/docker
+      org.opencontainers.image.url: https://hub.docker.com/r/polyphonic/stackarr
+      org.opencontainers.image.logo: https://stackarr.app/icon-512.png
+      org.opencontainers.image.icon: https://stackarr.app/icon-512.png
+      com.stackarr.icon: https://stackarr.app/icon-512.png
+      homepage.name: Stackarr
+      homepage.description: Manage your self-hosted apps and homelab from chat or the dashboard
+      homepage.icon: https://stackarr.app/icon-512.png
+      homepage.href: http://127.0.0.1:${STACKARR_WEB_PORT:-7777}
+    restart: unless-stopped
+
+  qbittorrent:
+    profiles:
+      - qbittorrent
+    container_name: qbittorrent
+    image: ${QBITTORRENT_IMAGE:-lscr.io/linuxserver/qbittorrent:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      WEBUI_PORT: ${QBITTORRENT_WEBUI_PORT:-8081}
+      TORRENTING_PORT: ${QBITTORRENT_TORRENT_PORT:-6881}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent:/config"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${QBITTORRENT_BIND_IP:-127.0.0.1}:${QBITTORRENT_WEBUI_PORT:-8081}:${QBITTORRENT_WEBUI_PORT:-8081}"
+      - "${QBITTORRENT_TORRENT_PORT:-6881}:${QBITTORRENT_TORRENT_PORT:-6881}"
+      - "${QBITTORRENT_TORRENT_PORT:-6881}:${QBITTORRENT_TORRENT_PORT:-6881}/udp"
+    restart: unless-stopped
+
+  prowlarr:
+    container_name: prowlarr
+    image: ${PROWLARR_IMAGE:-lscr.io/linuxserver/prowlarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      # Docker is IPv4-only by default here, while indexer DNS often returns IPv6 records.
+      DOTNET_SYSTEM_NET_DISABLEIPV6: "1"
+      Prowlarr__Postgres__Host: ${PROWLARR_POSTGRES_HOST:-}
+      Prowlarr__Postgres__Port: ${PROWLARR_POSTGRES_PORT:-}
+      Prowlarr__Postgres__User: ${PROWLARR_POSTGRES_USER:-prowlarr}
+      Prowlarr__Postgres__Password: ${PROWLARR_POSTGRES_PASSWORD:-stackarr}
+      Prowlarr__Postgres__MainDb: ${PROWLARR_POSTGRES_MAIN_DATABASE:-prowlarr-main}
+      Prowlarr__Postgres__LogDb: ${PROWLARR_POSTGRES_LOG_DATABASE:-prowlarr-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/prowlarr:/config"
+    ports:
+      - "${PROWLARR_BIND_IP:-127.0.0.1}:9696:9696"
+    restart: unless-stopped
+
+  sonarr:
+    profiles:
+      - tv
+    container_name: sonarr
+    image: ${SONARR_IMAGE:-lscr.io/linuxserver/sonarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      Sonarr__Postgres__Host: ${SONARR_POSTGRES_HOST:-}
+      Sonarr__Postgres__Port: ${SONARR_POSTGRES_PORT:-}
+      Sonarr__Postgres__User: ${SONARR_POSTGRES_USER:-sonarr}
+      Sonarr__Postgres__Password: ${SONARR_POSTGRES_PASSWORD:-stackarr}
+      Sonarr__Postgres__MainDb: ${SONARR_POSTGRES_MAIN_DATABASE:-sonarr-main}
+      Sonarr__Postgres__LogDb: ${SONARR_POSTGRES_LOG_DATABASE:-sonarr-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/sonarr:/config"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
+      - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${SONARR_BIND_IP:-127.0.0.1}:8989:8989"
+    logging:
+      driver: "none"
+    restart: unless-stopped
+
+  sonarr4k:
+    profiles:
+      - sonarr4k
+    container_name: sonarr4k
+    image: ${SONARR_IMAGE:-lscr.io/linuxserver/sonarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      Sonarr__Postgres__Host: ${SONARR4K_POSTGRES_HOST:-}
+      Sonarr__Postgres__Port: ${SONARR4K_POSTGRES_PORT:-}
+      Sonarr__Postgres__User: ${SONARR4K_POSTGRES_USER:-sonarr4k}
+      Sonarr__Postgres__Password: ${SONARR4K_POSTGRES_PASSWORD:-stackarr}
+      Sonarr__Postgres__MainDb: ${SONARR4K_POSTGRES_MAIN_DATABASE:-sonarr4k-main}
+      Sonarr__Postgres__LogDb: ${SONARR4K_POSTGRES_LOG_DATABASE:-sonarr4k-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/sonarr4k:/config"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
+      - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${SONARR_4K_BIND_IP:-127.0.0.1}:8990:8989"
+    logging:
+      driver: "none"
+    restart: unless-stopped
+
+  radarr:
+    profiles:
+      - movies
+    container_name: radarr
+    image: ${RADARR_IMAGE:-lscr.io/linuxserver/radarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      Radarr__Postgres__Host: ${RADARR_POSTGRES_HOST:-}
+      Radarr__Postgres__Port: ${RADARR_POSTGRES_PORT:-}
+      Radarr__Postgres__User: ${RADARR_POSTGRES_USER:-radarr}
+      Radarr__Postgres__Password: ${RADARR_POSTGRES_PASSWORD:-stackarr}
+      Radarr__Postgres__MainDb: ${RADARR_POSTGRES_MAIN_DATABASE:-radarr-main}
+      Radarr__Postgres__LogDb: ${RADARR_POSTGRES_LOG_DATABASE:-radarr-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/radarr:/config"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
+      - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${RADARR_BIND_IP:-127.0.0.1}:7878:7878"
+    restart: unless-stopped
+
+  radarr4k:
+    profiles:
+      - radarr4k
+    container_name: radarr4k
+    image: ${RADARR_IMAGE:-lscr.io/linuxserver/radarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      Radarr__Postgres__Host: ${RADARR4K_POSTGRES_HOST:-}
+      Radarr__Postgres__Port: ${RADARR4K_POSTGRES_PORT:-}
+      Radarr__Postgres__User: ${RADARR4K_POSTGRES_USER:-radarr4k}
+      Radarr__Postgres__Password: ${RADARR4K_POSTGRES_PASSWORD:-stackarr}
+      Radarr__Postgres__MainDb: ${RADARR4K_POSTGRES_MAIN_DATABASE:-radarr4k-main}
+      Radarr__Postgres__LogDb: ${RADARR4K_POSTGRES_LOG_DATABASE:-radarr4k-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/hooks:/stackarr-hooks:rw"
+      - "${APP_ROOT:-./.stackarr}/config/radarr4k:/config"
+      - "${APP_ROOT:-./.stackarr}/config/qbittorrent/qBittorrent/BT_backup:/torrent-client-state/qbittorrent:rw"
+      - "${APP_ROOT:-./.stackarr}/state/torrent-archive:/torrent-archive"
+      - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${RADARR_4K_BIND_IP:-127.0.0.1}:7879:7878"
+    restart: unless-stopped
+
+  bazarr:
+    profiles:
+      - bazarr
+    container_name: bazarr
+    image: ${BAZARR_IMAGE:-lscr.io/linuxserver/bazarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      POSTGRES_ENABLED: ${BAZARR_POSTGRES_ENABLED:-false}
+      POSTGRES_HOST: ${BAZARR_POSTGRES_HOST:-}
+      POSTGRES_PORT: ${BAZARR_POSTGRES_PORT:-}
+      POSTGRES_DATABASE: ${BAZARR_POSTGRES_DATABASE:-bazarr}
+      POSTGRES_USERNAME: ${BAZARR_POSTGRES_USER:-bazarr}
+      POSTGRES_PASSWORD: ${BAZARR_POSTGRES_PASSWORD:-stackarr}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/bazarr:/config"
+      - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
+      - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
+    ports:
+      - "${BAZARR_BIND_IP:-127.0.0.1}:6767:6767"
+    restart: unless-stopped
+
+  tinymediamanager:
+    profiles:
+      - tinymediamanager
+    container_name: tinymediamanager
+    image: ${TINYMEDIAMANAGER_IMAGE:-tinymediamanager/tinymediamanager:latest}
+    environment:
+      USER_ID: ${PUID:-1000}
+      GROUP_ID: ${PGID:-1000}
+      PASSWORD: ${TINYMEDIAMANAGER_PASSWORD:-${PASSWORD:-stackarr}}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      ALLOW_DIRECT_VNC: "true"
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/tinymediamanager:/data"
+      - "${APP_ROOT:-./.stackarr}/config/tinymediamanager/addons:/app/addons"
+      - "${MEDIA_ROOT:-./.stackarr/media}:/media"
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:5900:5900"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "20m"
+    restart: unless-stopped
+
+  pulsarr:
+    profiles:
+      - pulsarr
+    container_name: pulsarr
+    image: ${PULSARR_IMAGE:-lakker/pulsarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      listenPort: ${PULSARR_PORT:-3003}
+      authenticationMethod: ${PULSARR_AUTHENTICATION_METHOD:-requiredExceptLocal}
+      cookieSecured: ${PULSARR_COOKIE_SECURED:-false}
+      dbType: ${PULSARR_DB_TYPE:-sqlite}
+      dbPath: ${PULSARR_DB_PATH:-/app/data/db/pulsarr.db}
+      dbHost: ${PULSARR_DB_HOST:-}
+      dbPort: ${PULSARR_DB_PORT:-5432}
+      dbName: ${PULSARR_DB_NAME:-}
+      dbUser: ${PULSARR_DB_USER:-}
+      dbPassword: ${PULSARR_DB_PASSWORD:-}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/pulsarr:/app/data"
+    ports:
+      - "${PULSARR_BIND_IP:-127.0.0.1}:${PULSARR_PORT:-3003}:${PULSARR_PORT:-3003}"
+    labels:
+      org.opencontainers.image.title: Pulsarr
+      org.opencontainers.image.description: Real-time Plex watchlist monitoring and content routing for Sonarr/Radarr.
+      org.opencontainers.image.icon: https://raw.githubusercontent.com/jamcalli/Pulsarr/master/assets/icons/pulsarr.svg
+      com.stackarr.icon: https://raw.githubusercontent.com/jamcalli/Pulsarr/master/assets/icons/pulsarr.svg
+      homepage.name: Pulsarr
+      homepage.description: Plex watchlist automation
+      homepage.icon: https://raw.githubusercontent.com/jamcalli/Pulsarr/master/assets/icons/pulsarr.svg
+      homepage.href: http://127.0.0.1:${PULSARR_PORT:-3003}
+    restart: unless-stopped
+
+  tdarr:
+    profiles: ['tdarr']
+    container_name: tdarr
+    image: ${TDARR_IMAGE:-ghcr.io/haveagitgat/tdarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      UMASK_SET: "002"
+      serverIP: 0.0.0.0
+      serverPort: "8266"
+      webUIPort: "8265"
+      serverURL: http://127.0.0.1:8266
+      internalNode: ${TDARR_INTERNAL_NODE:-true}
+      inContainer: "true"
+      nodeName: ${TDARR_NODE_NAME:-stackarr-node}
+      nodeType: mapped
+      ffmpegVersion: "7"
+      auth: ${TDARR_AUTH:-true}
+      seededApiKey: ${TDARR_API_KEY:-}
+      apiKey: ${TDARR_API_KEY:-}
+      openBrowser: "false"
+      startPaused: ${TDARR_START_PAUSED:-true}
+      transcodecpuWorkers: "1"
+      transcodegpuWorkers: "0"
+      healthcheckcpuWorkers: "1"
+      healthcheckgpuWorkers: "0"
+      maxLogSizeMB: "10"
+    volumes:
+      - "${CONFIG_ROOT:-./.stackarr/config}/tdarr/server:/app/server"
+      - "${CONFIG_ROOT:-./.stackarr/config}/tdarr/configs:/app/configs"
+      - "${CONFIG_ROOT:-./.stackarr/config}/tdarr/logs:/app/logs"
+      - "${TDARR_MEDIA_ROOT:-${MEDIA_ROOT:-./.stackarr/media}}:/media"
+      - "${TDARR_CACHE_ROOT:-./.stackarr/cache/tdarr}:/temp"
+    ports:
+      - "${TDARR_BIND_IP:-127.0.0.1}:${TDARR_WEB_PORT:-8265}:8265"
+      - "${TDARR_BIND_IP:-127.0.0.1}:${TDARR_SERVER_PORT:-8266}:8266"
+    labels:
+      org.opencontainers.image.title: Tdarr
+      org.opencontainers.image.description: Media transcoding and health checks with an internal worker.
+      org.opencontainers.image.source: https://github.com/HaveAGitGat/Tdarr
+      org.opencontainers.image.documentation: https://docs.tdarr.io/
+      homepage.name: Tdarr
+      homepage.description: Media transcoding and health checks
+      homepage.href: http://127.0.0.1:${TDARR_WEB_PORT:-8265}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8266/api/v2/status',{headers:{'x-api-key':process.env.apiKey||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  maintainerr:
+    profiles:
+      - maintainerr
+    container_name: maintainerr
+    image: ${MAINTAINERR_IMAGE:-ghcr.io/maintainerr/maintainerr:latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      TZ: ${TIMEZONE:-Etc/UTC}
+      UI_PORT: ${MAINTAINERR_PORT:-6246}
+      BASE_PATH: ${MAINTAINERR_BASE_PATH:-}
+      GITHUB_TOKEN: ${MAINTAINERR_GITHUB_TOKEN:-}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/maintainerr:/opt/data"
+    ports:
+      - "${MAINTAINERR_BIND_IP:-127.0.0.1}:${MAINTAINERR_PORT:-6246}:${MAINTAINERR_PORT:-6246}"
+    labels:
+      org.opencontainers.image.title: Maintainerr
+      org.opencontainers.image.description: Media library cleanup planning and collection management for Plex and Jellyfin.
+      org.opencontainers.image.source: https://github.com/maintainerr/maintainerr
+      org.opencontainers.image.documentation: https://docs.maintainerr.info/latest/
+      homepage.name: Maintainerr
+      homepage.description: Library cleanup planner
+      homepage.href: http://127.0.0.1:${MAINTAINERR_PORT:-6246}
+    healthcheck:
+      test: ["CMD", "/opt/app/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  cleanuparr:
+    profiles: ['cleanuparr']
+    image: ${CLEANUPARR_IMAGE:-ghcr.io/cleanuparr/cleanuparr:latest}
+    container_name: cleanuparr
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      UMASK: ${UMASK:-002}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      PORT: 11011
+      BASE_PATH: ''
+      DATABASE_PROVIDER: ${CLEANUPARR_DATABASE_PROVIDER:-sqlite}
+      POSTGRES_HOST: ${CLEANUPARR_POSTGRES_HOST:-database}
+      POSTGRES_PORT: ${CLEANUPARR_POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${CLEANUPARR_POSTGRES_USER:-cleanuparr}
+      POSTGRES_PASS: ${CLEANUPARR_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${CLEANUPARR_POSTGRES_DATABASE:-cleanuparr}
+    ports:
+      - '${CLEANUPARR_BIND_IP:-127.0.0.1}:${CLEANUPARR_PORT:-11011}:11011'
+    volumes:
+      - ${APP_ROOT:-./.stackarr}/config/cleanuparr:/config
+    depends_on:
+      database:
+        condition: service_healthy
+        required: false
+    security_opt:
+      - no-new-privileges:true
+
+  agregarr:
+    profiles:
+      - agregarr
+    container_name: agregarr
+    image: ${AGREGARR_IMAGE:-agregarr/agregarr:latest}
+    # The startup guard needs root only long enough to patch an upstream cleanup bug,
+    # then Node drops permanently to the installation's configured runtime user.
+    user: "0:0"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      CONFIG_DIRECTORY: /app/config
+      # Playwright-backed IMDb/Letterboxd sources need writable Chromium runtime paths.
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        exec /sbin/tini -- node /stackarr-runtime/agregarr-placeholder-guard.cjs /app/dist/lib/placeholders/services/PlaceholderCleanup.js /app/dist/lib/placeholders/placeholderManager.js "$${PUID}" "$${PGID}" "$$@"
+      - stackarr-agregarr
+    command:
+      - yarn
+      - start
+    volumes:
+      - "./agregarr-placeholder-guard.cjs:/stackarr-runtime/agregarr-placeholder-guard.cjs:rw"
+      - "${APP_ROOT:-./.stackarr}/config/agregarr:/app/config"
+      # Required only when placeholder-backed sources (e.g. Coming Soon) are enabled.
+      # Agregarr writes to a configurable subfolder (default: _Trailers) inside these Plex library roots
+      # so trailer placeholders are not imported as real Radarr/Sonarr files.
+      - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
+      - "${MEDIA_ROOT:-./.stackarr/media}/TV Shows:/tv"
+    ports:
+      - "${AGREGARR_BIND_IP:-127.0.0.1}:${AGREGARR_PORT:-7171}:7171"
+    labels:
+      org.opencontainers.image.title: Agregarr
+      org.opencontainers.image.description: Plex home-screen and collection curator.
+      org.opencontainers.image.source: https://github.com/agregarr/agregarr
+      org.opencontainers.image.documentation: https://github.com/agregarr/agregarr#readme
+      homepage.name: Agregarr
+      homepage.description: Plex collection curator
+      homepage.href: http://127.0.0.1:${AGREGARR_PORT:-7171}
+      homepage.icon: https://raw.githubusercontent.com/agregarr/agregarr/main/public/os_icon.svg
+      com.stackarr.icon: https://raw.githubusercontent.com/agregarr/agregarr/main/public/os_icon.svg
+    restart: unless-stopped
+
+  tracearr:
+    profiles:
+      - tracearr
+    container_name: tracearr
+    image: ${TRACEARR_IMAGE:-ghcr.io/connorgallopo/tracearr:latest}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      TZ: ${TIMEZONE:-Etc/UTC}
+      DATABASE_URL: ${TRACEARR_DATABASE_URL:-postgres://tracearr:stackarr@database:5432/tracearr}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${TRACEARR_JWT_SECRET:-}
+      COOKIE_SECRET: ${TRACEARR_COOKIE_SECRET:-}
+      CORS_ORIGIN: ${TRACEARR_CORS_ORIGIN:-*}
+      LOG_LEVEL: ${TRACEARR_LOG_LEVEL:-info}
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/tracearr/backups:/data/backup"
+    ports:
+      - "${TRACEARR_BIND_IP:-127.0.0.1}:${TRACEARR_PORT:-3000}:3000"
+    labels:
+      org.opencontainers.image.title: Tracearr
+      org.opencontainers.image.description: Real-time monitoring and analytics for Plex, Jellyfin, and Emby.
+      org.opencontainers.image.source: https://github.com/connorgallopo/Tracearr
+      org.opencontainers.image.documentation: https://docs.tracearr.com/
+      homepage.name: Tracearr
+      homepage.description: Media-server monitoring
+      homepage.href: http://127.0.0.1:${TRACEARR_PORT:-3000}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health',{signal:AbortSignal.timeout(4000)}).then(async r=>{const h=await r.json();process.exit(r.ok&&h.status==='ok'?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    restart: unless-stopped
+
+  redis:
+    profiles:
+      - tracearr
+      - immich
+      - romm
+    container_name: redis
+    image: ${REDIS_IMAGE:-redis:8.8.0-alpine}
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  seerr:
+    profiles:
+      - seerr
+    container_name: seerr
+    image: ${SEERR_IMAGE:-ghcr.io/seerr-team/seerr:latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      LOG_LEVEL: info
+      TZ: ${TIMEZONE:-Etc/UTC}
+      DB_TYPE: ${SEERR_DB_TYPE:-postgres}
+      DB_HOST: ${SEERR_POSTGRES_HOST:-database}
+      DB_PORT: 5432
+      DB_NAME: ${SEERR_POSTGRES_DATABASE:-seerr}
+      DB_USER: ${SEERR_POSTGRES_USER:-seerr}
+      DB_PASS: ${SEERR_POSTGRES_PASSWORD:-stackarr}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/seerr:/app/config"
+    ports:
+      - "${SEERR_BIND_IP:-127.0.0.1}:5055:5055"
+    restart: unless-stopped
+
+  plex:
+    profiles:
+      - plex
+    container_name: plex
+    image: ${PLEX_IMAGE:-lscr.io/linuxserver/plex:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      VERSION: docker
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/plex:/config"
+      - "${MEDIA_ROOT:-./.stackarr/media}:/media"
+    ports:
+      - "${PLEX_DOCKER_PORT:-32400}:32400"
+      - "127.0.0.1:32469:32469"
+    restart: unless-stopped
+
+  jellyfin:
+    profiles:
+      - jellyfin
+    container_name: jellyfin
+    image: ${JELLYFIN_IMAGE:-lscr.io/linuxserver/jellyfin:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/jellyfin:/config"
+      - "${MEDIA_ROOT:-./.stackarr/media}:/media"
+    ports:
+      - "${JELLYFIN_DOCKER_PORT:-8096}:8096"
+    restart: unless-stopped
+
+  recyclarr:
+    profiles:
+      - recyclarr
+    container_name: recyclarr
+    image: ${RECYCLARR_IMAGE:-ghcr.io/recyclarr/recyclarr:8}
+    environment:
+      TZ: ${TIMEZONE:-Etc/UTC}
+      CRON_SCHEDULE: 0 3 * * *
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/recyclarr:/config"
+    restart: unless-stopped
+
+  flaresolverr:
+    profiles:
+      - flaresolverr
+    container_name: flaresolverr
+    image: ${FLARESOLVERR_IMAGE:-ghcr.io/flaresolverr/flaresolverr:latest}
+    environment:
+      LOG_LEVEL: info
+      LOG_HTML: "false"
+      TZ: ${TIMEZONE:-Etc/UTC}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - flaresolverr-config:/config
+    ports:
+      - "127.0.0.1:8191:8191"
+    restart: unless-stopped
+
+  lidarr:
+    profiles:
+      - lidarr
+    container_name: lidarr
+    image: ${LIDARR_IMAGE:-lscr.io/linuxserver/lidarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      Lidarr__Postgres__Host: ${LIDARR_POSTGRES_HOST:-}
+      Lidarr__Postgres__Port: ${LIDARR_POSTGRES_PORT:-}
+      Lidarr__Postgres__User: ${LIDARR_POSTGRES_USER:-lidarr}
+      Lidarr__Postgres__Password: ${LIDARR_POSTGRES_PASSWORD:-stackarr}
+      Lidarr__Postgres__MainDb: ${LIDARR_POSTGRES_MAIN_DATABASE:-lidarr-main}
+      Lidarr__Postgres__LogDb: ${LIDARR_POSTGRES_LOG_DATABASE:-lidarr-log}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/lidarr:/config"
+      - "${MUSIC_ROOT:-./.stackarr/media/Music}:/music:rw"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${LIDARR_BIND_IP:-127.0.0.1}:8686:8686"
+    restart: unless-stopped
+
+  tidarr:
+    profiles:
+      - tidarr
+    container_name: tidarr
+    image: ${TIDARR_IMAGE:-cstaelen/tidarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+    volumes:
+      - "${APP_ROOT:-./.stackarr}/config/tidarr:/shared"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}/${DOWNLOAD_COMPLETE_NAME:-complete}/${LIDARR_CATEGORY:-lidarr}:/shared/nzb_downloads"
+      - "${MUSIC_ROOT:-./.stackarr/media/Music}:/music"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+    ports:
+      - "${TIDARR_BIND_IP:-127.0.0.1}:8484:8484"
+    restart: unless-stopped
+
+  bookorbit:
+    profiles:
+      - bookorbit
+    container_name: bookorbit
+    image: ${BOOKORBIT_IMAGE:-ghcr.io/bookorbit/bookorbit:latest}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: ${BOOKORBIT_CONTAINER_PORT:-7582}
+      DATABASE_URL: ${BOOKORBIT_DATABASE_URL:-postgres://bookorbit:stackarr@database:5432/bookorbit}
+      JWT_SECRET: ${BOOKORBIT_JWT_SECRET:-bookorbit-local-jwt-change-me}
+      SETUP_BOOTSTRAP_TOKEN: ${BOOKORBIT_SETUP_TOKEN:-bookorbit-local-bootstrap-change-me}
+      APP_URL: ${BOOKORBIT_APP_URL:-http://127.0.0.1:42873}
+      CLIENT_URL: ${BOOKORBIT_CLIENT_URL:-http://127.0.0.1:42873}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-2048}
+      APP_DATA_PATH: /data
+      BOOK_DOCK_PATH: /books/dock
+    volumes:
+      - "${BOOKS_ROOT:-./.stackarr/media/Books}:/books"
+      - "${APP_ROOT:-./.stackarr}/config/bookorbit/app:/data"
+    ports:
+      - "${BOOKORBIT_BIND_IP:-127.0.0.1}:${BOOKORBIT_WEB_PORT:-42873}:${BOOKORBIT_CONTAINER_PORT:-7582}"
+    labels:
+      org.opencontainers.image.title: BookOrbit
+      org.opencontainers.image.description: Book library management and reader sync for Stackarr.
+      homepage.name: BookOrbit
+      homepage.description: Books library manager
+      homepage.href: ${BOOKORBIT_URL:-http://127.0.0.1:42873}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:''+(process.env.PORT||7582)+''/api/v1/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  clamav:
+    profiles:
+      - questarr-import
+    container_name: clamav
+    image: ${CLAMAV_IMAGE:-clamav/clamav-debian:stable}
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads:rw"
+      - "${CLAMAV_DATA_ROOT:-./.stackarr/config/clamav}:/var/lib/clamav"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 3 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+  romm:
+    profiles:
+      - romm
+    container_name: romm
+    image: ${ROMM_IMAGE:-rommapp/romm:latest}
+    restart: unless-stopped
+    environment:
+      ROMM_DB_DRIVER: ${ROMM_DB_DRIVER:-postgresql}
+      DB_HOST: ${ROMM_DB_HOST:-database}
+      DB_PORT: ${ROMM_DB_PORT:-5432}
+      DB_NAME: ${ROMM_DB_NAME:-romm}
+      DB_USER: ${ROMM_DB_USER:-romm}
+      DB_PASSWD: ${ROMM_DB_PASSWORD:-stackarr}
+      DB_QUERY_JSON: ${ROMM_DB_QUERY_JSON:-}
+      REDIS_HOST: ${ROMM_REDIS_HOST:-redis}
+      REDIS_PORT: ${ROMM_REDIS_PORT:-6379}
+      ENABLE_RESCAN_ON_FILESYSTEM_CHANGE: ${ROMM_ENABLE_RESCAN_ON_FILESYSTEM_CHANGE:-false}
+      RESCAN_ON_FILESYSTEM_CHANGE_DELAY: ${ROMM_RESCAN_ON_FILESYSTEM_CHANGE_DELAY:-5}
+      ROMM_AUTH_SECRET_KEY: ${ROMM_AUTH_SECRET_KEY:-romm-local-secret-change-me}
+      IGDB_CLIENT_ID: ${ROMM_IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${ROMM_IGDB_CLIENT_SECRET:-}
+      MOBYGAMES_API_KEY: ${ROMM_MOBYGAMES_API_KEY:-}
+      SCREENSCRAPER_USER: ${ROMM_SCREENSCRAPER_USER:-}
+      SCREENSCRAPER_PASSWORD: ${ROMM_SCREENSCRAPER_PASSWORD:-}
+      RETROACHIEVEMENTS_API_KEY: ${ROMM_RETROACHIEVEMENTS_API_KEY:-}
+      REFRESH_RETROACHIEVEMENTS_CACHE_DAYS: ${ROMM_REFRESH_RETROACHIEVEMENTS_CACHE_DAYS:-30}
+      STEAMGRIDDB_API_KEY: ${ROMM_STEAMGRIDDB_API_KEY:-}
+      HASHEOUS_API_ENABLED: ${ROMM_HASHEOUS_API_ENABLED:-true}
+      PLAYMATCH_API_ENABLED: ${ROMM_PLAYMATCH_API_ENABLED:-false}
+      LAUNCHBOX_API_ENABLED: ${ROMM_LAUNCHBOX_API_ENABLED:-false}
+      FLASHPOINT_API_ENABLED: ${ROMM_FLASHPOINT_API_ENABLED:-false}
+      HLTB_API_ENABLED: ${ROMM_HLTB_API_ENABLED:-false}
+      TGDB_API_ENABLED: ${ROMM_TGDB_API_ENABLED:-false}
+      ENABLE_SCHEDULED_UPDATE_LAUNCHBOX_METADATA: ${ROMM_ENABLE_SCHEDULED_UPDATE_LAUNCHBOX_METADATA:-false}
+      SCHEDULED_UPDATE_LAUNCHBOX_METADATA_CRON: ${ROMM_SCHEDULED_UPDATE_LAUNCHBOX_METADATA_CRON:-0 4 * * *}
+    volumes:
+      - romm-root:/romm
+      - "${ROMM_RESOURCES_ROOT:-./.stackarr/config/romm/resources}:/romm/resources"
+      - "${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}:/romm/library"
+      - "${ROMM_STEAM_MAC_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/romm/Steam"
+      - "${ROMM_STEAM_WINDOWS_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/romm/SteamWindows"
+      - "${ROMM_STEAM_LINUX_LIBRARY_ROOT:-${ROMM_LIBRARY_ROOT:-./.stackarr/media/Games}}:/romm/SteamLinux"
+      - "${ROMM_ASSETS_ROOT:-./.stackarr/config/romm/assets}:/romm/assets"
+      - "${ROMM_CONFIG_ROOT:-./.stackarr/config/romm/config}:/romm/config"
+    ports:
+      - "${ROMM_BIND_IP:-127.0.0.1}:${ROMM_WEB_PORT:-7583}:${ROMM_CONTAINER_PORT:-8080}"
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      org.opencontainers.image.title: RomM
+      org.opencontainers.image.description: Private ROM manager and browser-play game library for Stackarr.
+      org.opencontainers.image.source: https://github.com/rommapp/romm
+      com.stackarr.romm.steam-library-enabled: ${ROMM_STEAM_LIBRARY_ENABLED:-false}
+      org.opencontainers.image.documentation: https://docs.romm.app/latest/Getting-Started/Quick-Start-Guide/
+      homepage.name: RomM
+      homepage.description: Private game library
+      homepage.href: ${ROMM_URL:-http://127.0.0.1:7583}
+
+  questarr:
+    profiles:
+      - questarr
+    container_name: questarr
+    image: ${QUESTARR_IMAGE:-ghcr.io/doezer/questarr:latest}
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-Etc/UTC}
+      HOST: 0.0.0.0
+      PORT: ${QUESTARR_CONTAINER_PORT:-5000}
+      SQLITE_DB_PATH: ${QUESTARR_SQLITE_DB_PATH:-/app/data/sqlite.db}
+      JWT_SECRET: ${QUESTARR_JWT_SECRET:-}
+      IGDB_CLIENT_ID: ${QUESTARR_IGDB_CLIENT_ID:-${ROMM_IGDB_CLIENT_ID:-}}
+      IGDB_CLIENT_SECRET: ${QUESTARR_IGDB_CLIENT_SECRET:-${ROMM_IGDB_CLIENT_SECRET:-}}
+      APP_URL: ${QUESTARR_APP_URL:-http://127.0.0.1:7584}
+      ALLOWED_ORIGINS: ${QUESTARR_ALLOWED_ORIGINS:-http://127.0.0.1:7584,http://localhost:7584}
+    volumes:
+      - "${QUESTARR_DATA_ROOT:-./.stackarr/config/questarr}:/app/data"
+      - "${DOWNLOADS_ROOT:-./.stackarr/downloads}:/downloads"
+      # Questarr finds and monitors downloads. Stackarr owns scanned RomM placement.
+    ports:
+      - "${QUESTARR_BIND_IP:-127.0.0.1}:${QUESTARR_WEB_PORT:-7584}:${QUESTARR_CONTAINER_PORT:-5000}"
+    labels:
+      org.opencontainers.image.title: Questarr
+      org.opencontainers.image.description: Game discovery and download automation for a RomM-managed library.
+      org.opencontainers.image.source: https://github.com/Doezer/Questarr
+      org.opencontainers.image.documentation: https://github.com/Doezer/Questarr/wiki/Configuration
+      homepage.name: Questarr
+      homepage.description: Game discovery and downloads
+      homepage.href: ${QUESTARR_URL:-http://127.0.0.1:7584}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:''+(process.env.PORT||5000)+''/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  youtarr-db:
+    profiles:
+      - youtarr
+    container_name: youtarr-db
+    image: ${YOUTARR_DB_IMAGE:-mariadb:10.11}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${YOUTARR_DB_ROOT_PASSWORD:-}
+      MYSQL_DATABASE: ${YOUTARR_DB_NAME:-youtarr}
+      MYSQL_USER: ${YOUTARR_DB_USER:-youtarr}
+      MYSQL_PASSWORD: ${YOUTARR_DB_PASSWORD:-}
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-file-per-table=1
+    volumes:
+      - youtarr-db-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mariadb-admin ping -h 127.0.0.1 --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  youtarr:
+    profiles:
+      - youtarr
+    container_name: youtarr
+    image: ${YOUTARR_IMAGE:-dialmaster/youtarr:latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      IN_DOCKER_CONTAINER: 1
+      TZ: ${TIMEZONE:-Etc/UTC}
+      DB_HOST: ${YOUTARR_DB_HOST:-youtarr-db}
+      DB_PORT: ${YOUTARR_DB_PORT:-3306}
+      DB_USER: ${YOUTARR_DB_USER:-youtarr}
+      DB_PASSWORD: ${YOUTARR_DB_PASSWORD:-}
+      DB_NAME: ${YOUTARR_DB_NAME:-youtarr}
+      AUTH_ENABLED: ${YOUTARR_LOGIN_ENABLED:-true}
+      AUTH_PRESET_USERNAME: ${YOUTARR_ADMIN_USERNAME:-admin}
+      AUTH_PRESET_PASSWORD: ${YOUTARR_ADMIN_PASSWORD:-}
+      TRUST_PROXY: ${YOUTARR_TRUST_PROXY:-false}
+      LOG_LEVEL: ${YOUTARR_LOG_LEVEL:-info}
+      PORT: ${YOUTARR_CONTAINER_PORT:-3011}
+      YOUTUBE_OUTPUT_DIR: ${YOUTARR_OUTPUT_ROOT:-./.stackarr/media/Videos/YouTube}
+      PLEX_URL: ${YOUTARR_PLEX_URL:-}
+    volumes:
+      - "${YOUTARR_OUTPUT_ROOT:-./.stackarr/media/Videos/YouTube}:/usr/src/app/data"
+      - "${YOUTARR_IMAGES_ROOT:-./.stackarr/config/youtarr/images}:/app/server/images"
+      - "${YOUTARR_CONFIG_ROOT:-./.stackarr/config/youtarr/config}:/app/config"
+      - "${YOUTARR_JOBS_ROOT:-./.stackarr/config/youtarr/jobs}:/app/jobs"
+    ports:
+      - "${YOUTARR_BIND_IP:-127.0.0.1}:${YOUTARR_WEB_PORT:-3087}:${YOUTARR_CONTAINER_PORT:-3011}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      youtarr-db:
+        condition: service_healthy
+    labels:
+      org.opencontainers.image.title: Youtarr
+      org.opencontainers.image.description: Private YouTube channel tracking, downloads, and Plex library integration.
+      org.opencontainers.image.source: https://github.com/DialmasterOrg/Youtarr
+      org.opencontainers.image.documentation: https://github.com/DialmasterOrg/Youtarr/wiki
+      homepage.name: Youtarr
+      homepage.description: YouTube downloads and library management
+      homepage.href: ${YOUTARR_URL:-http://127.0.0.1:3087}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--output",
+          "/dev/null",
+          "http://127.0.0.1:${YOUTARR_CONTAINER_PORT:-3011}/api/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  immich:
+    profiles:
+      - immich
+    container_name: immich
+    image: ${IMMICH_SERVER_IMAGE:-ghcr.io/immich-app/immich-server}:${IMMICH_VERSION:-release}
+    environment:
+      TZ: ${TIMEZONE:-Etc/UTC}
+      DB_HOSTNAME: database
+      DB_PORT: 5432
+      DB_USERNAME: ${IMMICH_DB_USERNAME:-immich}
+      DB_PASSWORD: ${IMMICH_DB_PASSWORD:-stackarr}
+      DB_DATABASE_NAME: ${IMMICH_DB_DATABASE_NAME:-immich}
+      DB_VECTOR_EXTENSION: ${IMMICH_DB_VECTOR_EXTENSION:-pgvector}
+      REDIS_HOSTNAME: redis
+      REDIS_PORT: 6379
+      IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
+    volumes:
+      - "${IMMICH_UPLOAD_LOCATION:-./.stackarr/media/Pictures}:/data"
+      - "${IMMICH_EXTERNAL_LIBRARY_LOCATION:-immich-external}:/external:rw"
+      - "/etc/localtime:/etc/localtime:rw"
+    ports:
+      - "${IMMICH_BIND_IP:-127.0.0.1}:${IMMICH_WEB_PORT:-2283}:${IMMICH_CONTAINER_PORT:-2283}"
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      org.opencontainers.image.title: Immich
+      org.opencontainers.image.description: Self-hosted photo and video backup for Stackarr.
+      org.opencontainers.image.source: https://github.com/immich-app/immich
+      org.opencontainers.image.documentation: https://docs.immich.app/install/docker-compose/
+      homepage.name: Immich
+      homepage.description: Photo and video backup
+      homepage.href: ${IMMICH_URL:-http://127.0.0.1:2283}
+    healthcheck:
+      disable: false
+    restart: unless-stopped
+
+  immich-ml:
+    profiles:
+      - immich
+    container_name: immich-ml
+    image: ${IMMICH_MACHINE_LEARNING_IMAGE:-ghcr.io/immich-app/immich-machine-learning}:${IMMICH_VERSION:-release}
+    environment:
+      TZ: ${TIMEZONE:-Etc/UTC}
+    volumes:
+      - immich-model-cache:/cache
+    healthcheck:
+      disable: false
+    restart: unless-stopped
+
+volumes:
+  stackarr-state:
+  redis-data:
+  immich-model-cache:
+  immich-external:
+  youtarr-db-data:
+  flaresolverr-config:
+    name: ${COMPOSE_PROJECT_NAME:-stackarr}_flaresolverr-config
+  romm-root:
+    name: ${COMPOSE_PROJECT_NAME:-stackarr}_romm-root
