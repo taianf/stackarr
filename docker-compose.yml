@@ -53,7 +53,7 @@ services:
     command: postgres -c timescaledb.license=timescale -c timescaledb.max_tuples_decompressed_per_dml_transaction=0 -c max_locks_per_transaction=4096 -c timescaledb.telemetry_level=off
     environment:
       POSTGRES_USER: ${DATABASE_SUPERUSER:-postgres}
-      POSTGRES_PASSWORD: ${DATABASE_SUPERUSER_PASSWORD:-stackarr}
+      POSTGRES_PASSWORD: ${DATABASE_SUPERUSER_PASSWORD:?DATABASE_SUPERUSER_PASSWORD must be set in .env}
       POSTGRES_DB: ${DATABASE_NAME:-postgres}
       PGDATA: ${DATABASE_PGDATA:-/var/lib/postgresql/data}
     volumes:
@@ -191,7 +191,7 @@ services:
       Prowlarr__Postgres__Host: ${PROWLARR_POSTGRES_HOST:-}
       Prowlarr__Postgres__Port: ${PROWLARR_POSTGRES_PORT:-}
       Prowlarr__Postgres__User: ${PROWLARR_POSTGRES_USER:-prowlarr}
-      Prowlarr__Postgres__Password: ${PROWLARR_POSTGRES_PASSWORD:-stackarr}
+      Prowlarr__Postgres__Password: ${PROWLARR_POSTGRES_PASSWORD:?PROWLARR_POSTGRES_PASSWORD must be set in .env}
       Prowlarr__Postgres__MainDb: ${PROWLARR_POSTGRES_MAIN_DATABASE:-prowlarr-main}
       Prowlarr__Postgres__LogDb: ${PROWLARR_POSTGRES_LOG_DATABASE:-prowlarr-log}
     dns:
@@ -215,7 +215,7 @@ services:
       Sonarr__Postgres__Host: ${SONARR_POSTGRES_HOST:-}
       Sonarr__Postgres__Port: ${SONARR_POSTGRES_PORT:-}
       Sonarr__Postgres__User: ${SONARR_POSTGRES_USER:-sonarr}
-      Sonarr__Postgres__Password: ${SONARR_POSTGRES_PASSWORD:-stackarr}
+      Sonarr__Postgres__Password: ${SONARR_POSTGRES_PASSWORD:?SONARR_POSTGRES_PASSWORD must be set in .env}
       Sonarr__Postgres__MainDb: ${SONARR_POSTGRES_MAIN_DATABASE:-sonarr-main}
       Sonarr__Postgres__LogDb: ${SONARR_POSTGRES_LOG_DATABASE:-sonarr-log}
     dns:
@@ -246,7 +246,7 @@ services:
       Sonarr__Postgres__Host: ${SONARR4K_POSTGRES_HOST:-}
       Sonarr__Postgres__Port: ${SONARR4K_POSTGRES_PORT:-}
       Sonarr__Postgres__User: ${SONARR4K_POSTGRES_USER:-sonarr4k}
-      Sonarr__Postgres__Password: ${SONARR4K_POSTGRES_PASSWORD:-stackarr}
+      Sonarr__Postgres__Password: ${SONARR4K_POSTGRES_PASSWORD:?SONARR4K_POSTGRES_PASSWORD must be set in .env}
       Sonarr__Postgres__MainDb: ${SONARR4K_POSTGRES_MAIN_DATABASE:-sonarr4k-main}
       Sonarr__Postgres__LogDb: ${SONARR4K_POSTGRES_LOG_DATABASE:-sonarr4k-log}
     dns:
@@ -277,7 +277,7 @@ services:
       Radarr__Postgres__Host: ${RADARR_POSTGRES_HOST:-}
       Radarr__Postgres__Port: ${RADARR_POSTGRES_PORT:-}
       Radarr__Postgres__User: ${RADARR_POSTGRES_USER:-radarr}
-      Radarr__Postgres__Password: ${RADARR_POSTGRES_PASSWORD:-stackarr}
+      Radarr__Postgres__Password: ${RADARR_POSTGRES_PASSWORD:?RADARR_POSTGRES_PASSWORD must be set in .env}
       Radarr__Postgres__MainDb: ${RADARR_POSTGRES_MAIN_DATABASE:-radarr-main}
       Radarr__Postgres__LogDb: ${RADARR_POSTGRES_LOG_DATABASE:-radarr-log}
     dns:
@@ -306,7 +306,7 @@ services:
       Radarr__Postgres__Host: ${RADARR4K_POSTGRES_HOST:-}
       Radarr__Postgres__Port: ${RADARR4K_POSTGRES_PORT:-}
       Radarr__Postgres__User: ${RADARR4K_POSTGRES_USER:-radarr4k}
-      Radarr__Postgres__Password: ${RADARR4K_POSTGRES_PASSWORD:-stackarr}
+      Radarr__Postgres__Password: ${RADARR4K_POSTGRES_PASSWORD:?RADARR4K_POSTGRES_PASSWORD must be set in .env}
       Radarr__Postgres__MainDb: ${RADARR4K_POSTGRES_MAIN_DATABASE:-radarr4k-main}
       Radarr__Postgres__LogDb: ${RADARR4K_POSTGRES_LOG_DATABASE:-radarr4k-log}
     dns:
@@ -337,7 +337,7 @@ services:
       POSTGRES_PORT: ${BAZARR_POSTGRES_PORT:-}
       POSTGRES_DATABASE: ${BAZARR_POSTGRES_DATABASE:-bazarr}
       POSTGRES_USERNAME: ${BAZARR_POSTGRES_USER:-bazarr}
-      POSTGRES_PASSWORD: ${BAZARR_POSTGRES_PASSWORD:-stackarr}
+      POSTGRES_PASSWORD: ${BAZARR_POSTGRES_PASSWORD:?BAZARR_POSTGRES_PASSWORD must be set in .env}
     volumes:
       - "${APP_ROOT:-./.stackarr}/config/bazarr:/config"
       - "${MEDIA_ROOT:-./.stackarr/media}/Movies:/movies"
@@ -354,7 +354,7 @@ services:
     environment:
       USER_ID: ${PUID:-1000}
       GROUP_ID: ${PGID:-1000}
-      PASSWORD: ${TINYMEDIAMANAGER_PASSWORD:-${PASSWORD:-stackarr}}
+      PASSWORD: ${TINYMEDIAMANAGER_PASSWORD:?TINYMEDIAMANAGER_PASSWORD must be set in .env}
       TZ: ${TIMEZONE:-Etc/UTC}
       ALLOW_DIRECT_VNC: "true"
       LC_ALL: en_US.UTF-8
@@ -580,7 +580,8 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       TZ: ${TIMEZONE:-Etc/UTC}
-      DATABASE_URL: ${TRACEARR_DATABASE_URL:-postgres://tracearr:stackarr@database:5432/tracearr}
+      # DSN embute a senha: nao usar default, tem de vir de .env
+      DATABASE_URL: ${TRACEARR_DATABASE_URL:?TRACEARR_DATABASE_URL must be set in .env}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${TRACEARR_JWT_SECRET:-}
       COOKIE_SECRET: ${TRACEARR_COOKIE_SECRET:-}
@@ -642,7 +643,7 @@ services:
       DB_PORT: 5432
       DB_NAME: ${SEERR_POSTGRES_DATABASE:-seerr}
       DB_USER: ${SEERR_POSTGRES_USER:-seerr}
-      DB_PASS: ${SEERR_POSTGRES_PASSWORD:-stackarr}
+      DB_PASS: ${SEERR_POSTGRES_PASSWORD:?SEERR_POSTGRES_PASSWORD must be set in .env}
     volumes:
       - "${APP_ROOT:-./.stackarr}/config/seerr:/app/config"
     ports:
@@ -728,7 +729,7 @@ services:
       Lidarr__Postgres__Host: ${LIDARR_POSTGRES_HOST:-}
       Lidarr__Postgres__Port: ${LIDARR_POSTGRES_PORT:-}
       Lidarr__Postgres__User: ${LIDARR_POSTGRES_USER:-lidarr}
-      Lidarr__Postgres__Password: ${LIDARR_POSTGRES_PASSWORD:-stackarr}
+      Lidarr__Postgres__Password: ${LIDARR_POSTGRES_PASSWORD:?LIDARR_POSTGRES_PASSWORD must be set in .env}
       Lidarr__Postgres__MainDb: ${LIDARR_POSTGRES_MAIN_DATABASE:-lidarr-main}
       Lidarr__Postgres__LogDb: ${LIDARR_POSTGRES_LOG_DATABASE:-lidarr-log}
     dns:
@@ -770,9 +771,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${BOOKORBIT_CONTAINER_PORT:-7582}
-      DATABASE_URL: ${BOOKORBIT_DATABASE_URL:-postgres://bookorbit:stackarr@database:5432/bookorbit}
-      JWT_SECRET: ${BOOKORBIT_JWT_SECRET:-bookorbit-local-jwt-change-me}
-      SETUP_BOOTSTRAP_TOKEN: ${BOOKORBIT_SETUP_TOKEN:-bookorbit-local-bootstrap-change-me}
+      # DSN embute a senha: nao usar default, tem de vir de .env
+      DATABASE_URL: ${BOOKORBIT_DATABASE_URL:?BOOKORBIT_DATABASE_URL must be set in .env}
+      JWT_SECRET: ${BOOKORBIT_JWT_SECRET:?BOOKORBIT_JWT_SECRET must be set in .env}
+      SETUP_BOOTSTRAP_TOKEN: ${BOOKORBIT_SETUP_TOKEN:?BOOKORBIT_SETUP_TOKEN must be set in .env}
       APP_URL: ${BOOKORBIT_APP_URL:-http://127.0.0.1:42873}
       CLIENT_URL: ${BOOKORBIT_CLIENT_URL:-http://127.0.0.1:42873}
       PUID: ${PUID:-1000}
@@ -850,13 +852,13 @@ services:
       DB_PORT: ${ROMM_DB_PORT:-5432}
       DB_NAME: ${ROMM_DB_NAME:-romm}
       DB_USER: ${ROMM_DB_USER:-romm}
-      DB_PASSWD: ${ROMM_DB_PASSWORD:-stackarr}
+      DB_PASSWD: ${ROMM_DB_PASSWORD:?ROMM_DB_PASSWORD must be set in .env}
       DB_QUERY_JSON: ${ROMM_DB_QUERY_JSON:-}
       REDIS_HOST: ${ROMM_REDIS_HOST:-redis}
       REDIS_PORT: ${ROMM_REDIS_PORT:-6379}
       ENABLE_RESCAN_ON_FILESYSTEM_CHANGE: ${ROMM_ENABLE_RESCAN_ON_FILESYSTEM_CHANGE:-false}
       RESCAN_ON_FILESYSTEM_CHANGE_DELAY: ${ROMM_RESCAN_ON_FILESYSTEM_CHANGE_DELAY:-5}
-      ROMM_AUTH_SECRET_KEY: ${ROMM_AUTH_SECRET_KEY:-romm-local-secret-change-me}
+      ROMM_AUTH_SECRET_KEY: ${ROMM_AUTH_SECRET_KEY:?ROMM_AUTH_SECRET_KEY must be set in .env}
       IGDB_CLIENT_ID: ${ROMM_IGDB_CLIENT_ID:-}
       IGDB_CLIENT_SECRET: ${ROMM_IGDB_CLIENT_SECRET:-}
       MOBYGAMES_API_KEY: ${ROMM_MOBYGAMES_API_KEY:-}
@@ -1041,7 +1043,7 @@ services:
       DB_HOSTNAME: database
       DB_PORT: 5432
       DB_USERNAME: ${IMMICH_DB_USERNAME:-immich}
-      DB_PASSWORD: ${IMMICH_DB_PASSWORD:-stackarr}
+      DB_PASSWORD: ${IMMICH_DB_PASSWORD:?IMMICH_DB_PASSWORD must be set in .env}
       DB_DATABASE_NAME: ${IMMICH_DB_DATABASE_NAME:-immich}
       DB_VECTOR_EXTENSION: ${IMMICH_DB_VECTOR_EXTENSION:-pgvector}
       REDIS_HOSTNAME: redis
