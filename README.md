@@ -87,6 +87,39 @@ valor não pode ser deduzido do nome do arquivo de localização. Estão fixos e
 Para corrigir: ajuste na UI do app, leia com
 `SELECT Value FROM Config WHERE Key='uilanguage'`, e atualize a tabela.
 
+## Seerr
+
+Portal de pedidos, acessível pela TV em `http://172.23.71.110:5055`. O
+`SEERR_BIND_IP=0.0.0.0` no `.env` libera a porta; o Jellyfin já escutava em todas
+as interfaces por padrão, sem `BIND_IP` no compose.
+
+O Seerr tem **dois** passos, e eles têm naturezas diferentes:
+
+**1. Bootstrap (manual, uma vez).** Em `/setup`, o Seerr autentica no Jellyfin
+e cria o admin dele. Precisa da senha do Jellyfin — que não é recuperável, já
+que o app guarda PBKDF2 com salt por usuário. Por isso o Jellyfin aparece como
+"manual" no `apply-admin-password.sh`.
+
+| Serviço | Host | API Key |
+| --- | --- | --- |
+| Jellyfin | `http://jellyfin:8096` | usuário `taian` + senha |
+| Radarr | `http://radarr:7878` | em Settings → General |
+| Sonarr | `http://sonarr:8989` | em Settings → General |
+
+Use os nomes de serviço, não o IP: os containers dividem a rede
+`stackarr_default`.
+
+**2. Presets (automático, pelo Stackarr).** A opção "Wire Arr Services"
+(`STACKARR_CONFIGURE_SEERR`) faz o `stackarr requests apply` ligar o Seerr ao
+Radarr e ao Sonarr com os presets de request. Ela **não** faz o passo 1: usa
+uma `SEERR_API_KEY` que precisa já existir, então só funciona depois do
+bootstrap.
+
+Para ligar: `/setup` do painel em `http://127.0.0.1:7777/setup`, marcar Seerr e
+marcar "Wire Arr Services". Os campos vivem no `runtimeConfig` do
+`stackarr.db` e vêm desligados (`ENABLE_SEERR=false`,
+`STACKARR_CONFIGURE_SEERR=false`).
+
 ## Segurança
 
 - `.env` e `.stackarr/` estão no `.gitignore`. Um segredo enviado para um

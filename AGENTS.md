@@ -42,6 +42,32 @@ Use `reroot()` (os dois scripts já têm) depois de escrever em config ou banco.
 
 ## Decisões que parecem erradas, mas não são
 
+**O Stackarr tem integração de Seerr — não escreva um script para isso.**
+Existe uma opção "Wire Arr Services" (`STACKARR_CONFIGURE_SEERR`) e o comando
+`stackarr requests apply`, que aplicam os presets via API com `X-Api-Key`.
+
+Essa automação é montada em runtime a partir de `runtimeConfig` em
+`stackarr.db → app_settings`, e não aparece no frontend estático. Por isso uma
+busca por "seerr" nos binários devolve só um logo e um campo `SEERR_BIND_IP` —
+parece que o app não suporta Seerr, e é enganoso. A fonte real é o TypeScript
+em `/app/packages/core/src/`:
+
+- `serviceCatalog.ts` — a opção "Wire Arr Services" e o grupo de campos
+- `actions/setup.ts` — empurra `stackarr requests apply` quando
+  `enableSeerr && configureSeerr`
+- `/app/stackarr/scripts/requests.sh` — as chamadas de API
+
+Os dois campos vivem no `runtimeConfig` e vêm desligados numa instalação
+existente: `ENABLE_SEERR=false` e `STACKARR_CONFIGURE_SEERR=false`. Habilite-os
+pelo `/setup` do painel, não editando o banco na mão.
+
+**`requests apply` não faz o bootstrap do Seerr.** Ele chama
+`/api/v1/settings/main`, `/sonarr` e `/radarr` com uma `SEERR_API_KEY` que já
+precisa existir. O bootstrap é o `/setup` do próprio Seerr, que precisa da senha
+do Jellyfin — e ela não é recuperável, porque o Jellyfin guarda PBKDF2 com salt
+por usuário. Por isso o `apply-admin-password.sh` marca o Jellyfin como
+"manual". Não tente inferir a senha do hash.
+
 **Os valores de idioma são uma tabela literal, não um valor derivado.**
 Radarr `30`, Sonarr `33`, Lidarr `30`, Prowlarr `pt_BR`. Radarr e Lidarr
 coincidem em 30 e Sonarr exige 33, então qualquer dedução a partir do nome do
