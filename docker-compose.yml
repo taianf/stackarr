@@ -634,6 +634,13 @@ services:
       - seerr
     container_name: seerr
     image: ${SEERR_IMAGE:-ghcr.io/seerr-team/seerr:latest}
+    # init: true gives the node process a real PID 1, so SIGTERM reaches it and
+    # the container shuts down on time instead of waiting out the kill timeout.
+    init: true
+    # Seerr runs as UID 1000 (the node user) but Docker creates a bind mount as
+    # root, so on first boot it crash-loops with EACCES on /app/config/logs.
+    # Fix the owner once, as root, before the first start:
+    #   docker run --rm -v "$PWD/.stackarr/config:/cfg" alpine chown -R 1000:1000 /cfg/seerr
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       LOG_LEVEL: info
@@ -648,6 +655,12 @@ services:
       - "${APP_ROOT:-./.stackarr}/config/seerr:/app/config"
     ports:
       - "${SEERR_BIND_IP:-127.0.0.1}:5055:5055"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:5055/api/v1/status || exit 1"]
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      retries: 3
     restart: unless-stopped
 
   plex:
