@@ -88,6 +88,30 @@ Postgres, rode o script.
 container. Editar essa chave à mão e recriar o container na sequência funciona
 também; o script existe para não errar a ordem.
 
+**`Users.Identifier` é um GUID, não um e-mail.** Ao semear a conta admin numa
+instalação nova, o script gera `uuid4()` para `Identifier`. Um e-mail ali quebra
+o app inteiro: o Dapper tenta converter a coluna para Guid e estoura
+`Error parsing column 1 (Identifier=... - String) ---> Unrecognized Guid format`
+em toda requisição, o que aparece como "Failed to load Prowlarr". O
+`Identifier` é chave surrogate; o formulário de login usa `Username`.
+`Identifier` e `Password` são `NOT NULL`, `Salt` e `Iterations` são as demais
+colunas.
+
+**Numa instalação nova os *arr não têm `ApiKey` nem `AuthenticationMethod`.**
+Ambas só são gravadas no primeiro login pela interface. Por isso os scripts
+editam o banco direto em vez de chamar a API, e por isso `stackarr configure`
+não consegue ligar Radarr/Sonarr/Prowlarr/Seerr entre si: ele usa a API key,
+que ainda não existe. A ordem correta é: criar a conta (este script), fazer o
+primeiro login em cada app pela interface, e só então rodar o `configure`.
+
+**O login dos *arr é por formulário, não JSON.** `POST /api/v1/auth/login` com
+JSON devolve `401` mesmo com a senha correta; `POST /login` com
+`x-www-form-urlencoded` devolve `302`, que é sucesso. Não conclua que a senha
+está errada a partir do `401` do endpoint JSON.
+
+**O `Users.Identifier` de um app já existente não deve ser tocado.** O script
+só o escreve quando a tabela está vazia.
+
 **A senha do Stackarr fica em texto puro.** Em
 `stackarr.db → app_settings → "stackarr.runtimeConfig"`, comparada com
 `timingSafeEqual` contra o valor submetido. **Não aplique hash.** O par

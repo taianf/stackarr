@@ -42,9 +42,6 @@ read_env() {
 }
 
 ADMIN_USER="$(read_env STACKARR_ADMIN_USERNAME)"
-# Login e-mail for the *arr accounts: Users.Identifier is NOT NULL and is what the
-# app shows on the login form.
-ADMIN_EMAIL="$(read_env STACKARR_ADMIN_EMAIL)"
 ADMIN_PASS="$(read_env STACKARR_ADMIN_PASSWORD)"
 ADMIN_PASS="${ADMIN_PASS//\"/}"
 ADMIN_PASS="${ADMIN_PASS//\'/}"
@@ -54,8 +51,7 @@ if [[ -z $ADMIN_PASS ]]; then
 	exit 0
 fi
 
-ADMIN_EMAIL="${ADMIN_EMAIL:-$ADMIN_USER@localhost}"
-export ADMIN_USER ADMIN_EMAIL ADMIN_PASS MODE CONFIG_ROOT ENV_FILE ROOT
+export ADMIN_USER ADMIN_PASS MODE CONFIG_ROOT ENV_FILE ROOT
 
 if ! command -v python3 >/dev/null; then
 	echo "error: python3 is required" >&2
@@ -76,6 +72,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 
 try:
     import yaml
@@ -87,7 +84,6 @@ CFG = os.environ["CONFIG_ROOT"]
 ENV_FILE = os.environ["ENV_FILE"]
 ROOT = os.environ["ROOT"]
 USER = os.environ["ADMIN_USER"] or "admin"
-IDENTIFIER = os.environ["ADMIN_EMAIL"] or f"{USER}@localhost"
 PW = os.environ["ADMIN_PASS"].encode()
 CHECK = os.environ["MODE"] == "check"
 
@@ -199,13 +195,15 @@ def servarr(name):
         try:
             con = sqlite3.connect(db)
             salt = base64.b64encode(secrets.token_bytes(16)).decode()
-            # Identifier is the login email and is NOT NULL; Username is the
-            # display name. Both are required to satisfy the schema.
+            # Identifier is NOT NULL AND is parsed as a Guid by the *arr ORM
+            # (Dapper: "Unrecognized Guid format" on any non-GUID string), so an
+            # e-mail here breaks the app. It is a surrogate key, not a login:
+            # the sign-in form uses Username.
             con.execute(
                 "INSERT INTO Users (Identifier, Username, Password, Salt, Iterations)"
                 " VALUES (?,?,?,?,?)",
-                (IDENTIFIER, USER, servarr_hash(PW, salt, SERVARR_ITERATIONS),
-                 salt, SERVARR_ITERATIONS),
+                (str(uuid.uuid4()), USER,
+                 servarr_hash(PW, salt, SERVARR_ITERATIONS), salt, SERVARR_ITERATIONS),
             )
             con.commit()
             reroot(db)
